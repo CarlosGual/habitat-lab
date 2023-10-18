@@ -189,6 +189,7 @@ def build_rnn_inputs(
     T = x.size(0) // N
     print("T: ", T, x.size())
     dones = torch.logical_not(not_dones)
+    print("dones: ", dones.size())
 
     (
         select_inds,
