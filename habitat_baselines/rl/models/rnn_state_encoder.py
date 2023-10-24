@@ -184,12 +184,8 @@ def build_rnn_inputs(
     """
 
     N = rnn_states.size(1)
-    print('/////////////////**********************************************************************ASDFJASDFJASDFJASDFJ')
-    print("N: ", N, rnn_states.size())
     T = x.size(0) // N
-    print("T: ", T, x.size())
     dones = torch.logical_not(not_dones)
-    print("dones: ", dones.size())
 
     (
         select_inds,
