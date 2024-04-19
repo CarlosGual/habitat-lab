@@ -29,6 +29,7 @@ DEFAULT_PORT_RANGE = 127
 DEFAULT_MAIN_ADDR = "127.0.0.1"
 
 SLURM_JOBID = os.environ.get("SLURM_JOB_ID", None)
+TSUBAME_JOBID = os.environ.get("JOB_ID", None)
 RESUME_STATE_BASE_NAME = ".habitat-resume-state"
 
 
@@ -52,10 +53,33 @@ def is_slurm_batch_job() -> bool:
     )
 
 
+def is_tsubame_job() -> bool:
+    return TSUBAME_JOBID is not None
+
+
+def is_tsubame_batch_job() -> bool:
+    r"""Heuristic to determine if a slurm job is a batch job or not. Batch jobs
+    will have a job name that is not a shell unless the user specifically set the job
+    name to that of a shell. Interactive jobs have a shell name as their job name.
+    """
+    return is_tsubame_job() and os.environ.get("JOB_NAME", None) not in (
+        None,
+        "bash",
+        "zsh",
+        "fish",
+        "tcsh",
+        "sh",
+        "interactive",
+    )
+
+
 def resume_state_filename(config: Config) -> str:
     fname = RESUME_STATE_BASE_NAME
 
     if is_slurm_job() and config.RL.preemption.append_slurm_job_id:
+        fname += "-{}".format(SLURM_JOBID)
+
+    if is_tsubame_job() and config.RL.preemption.append_slurm_job_id:
         fname += "-{}".format(SLURM_JOBID)
 
     return osp.join(config.CHECKPOINT_FOLDER, fname + ".pth")
@@ -221,6 +245,11 @@ def get_distrib_size() -> Tuple[int, int, int]:
         local_rank = int(os.environ["SLURM_LOCALID"])
         world_rank = int(os.environ["SLURM_PROCID"])
         world_size = int(os.environ["SLURM_NTASKS"])
+    # Else parse from TSUBAME if using TSUBAME
+    elif os.environ.get("JOB_ID", None) is not None:
+        local_rank = int(os.environ["OMPI_COMM_WORLD_LOCAL_RANK"])
+        world_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])
+        world_size = int(os.environ["OMPI_COMM_WORLD_SIZE"])
     # Otherwise setup for just 1 process, this is nice for testing
     else:
         local_rank = 0
@@ -260,6 +289,47 @@ def init_distrib_slurm(
             os.environ.get("MAIN_PORT_RANGE", DEFAULT_PORT_RANGE)
         )
     main_addr = os.environ.get("MAIN_ADDR", DEFAULT_MAIN_ADDR)
+
+    tcp_store = distrib.TCPStore(  # type: ignore
+        main_addr, main_port, world_size, world_rank == 0
+    )
+    distrib.init_process_group(
+        backend, store=tcp_store, rank=world_rank, world_size=world_size
+    )
+
+    return local_rank, tcp_store
+
+
+def init_distrib_tsubame(
+    backend: str = "nccl",
+) -> Tuple[int, torch.distributed.TCPStore]:  # type: ignore
+    r"""Initializes torch.distributed by parsing environment variables set
+        by SLURM when ``srun`` is used or by parsing environment variables set
+        by torch.distributed.launch
+
+    :param backend: Which torch.distributed backend to use
+
+    :returns: Tuple of the local_rank (aka which GPU to use for this process)
+        and the TCPStore used for the rendezvous
+    """
+    assert (
+        torch.distributed.is_available()
+    ), "torch.distributed must be available"
+
+    if "GLOO_SOCKET_IFNAME" not in os.environ:
+        os.environ["GLOO_SOCKET_IFNAME"] = get_ifname()
+
+    if "NCCL_SOCKET_IFNAME" not in os.environ:
+        os.environ["NCCL_SOCKET_IFNAME"] = get_ifname()
+
+    local_rank, world_rank, world_size = get_distrib_size()
+
+    main_port = int(os.environ.get("MASTER_PORT", DEFAULT_PORT))
+    if TSUBAME_JOBID is not None:
+        main_port += int(TSUBAME_JOBID) % int(
+            os.environ.get("MAIN_PORT_RANGE", DEFAULT_PORT_RANGE)
+        )
+    main_addr = os.environ.get("MASTER_ADDR", DEFAULT_MAIN_ADDR)
 
     tcp_store = distrib.TCPStore(  # type: ignore
         main_addr, main_port, world_size, world_rank == 0
