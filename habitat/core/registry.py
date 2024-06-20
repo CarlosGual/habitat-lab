@@ -210,7 +210,7 @@ class Registry(metaclass=Singleton):
         """
         from habitat.core.env import RLEnv
 
-        return cls._register_impl("env", to_register, name, assert_type=RLEnv)
+        return cls._register_impl("env", to_register, name, assert_type=None)
 
     @classmethod
     def _get_impl(cls, _type: str, name: str) -> Type:
