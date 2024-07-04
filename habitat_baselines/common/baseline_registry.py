@@ -74,7 +74,7 @@ class BaselineRegistry(Registry):
         from habitat_baselines.rl.ppo.policy import Policy
 
         return cls._register_impl(
-            "policy", to_register, name, assert_type=Policy
+            "policy", to_register, name, assert_type=None
         )
 
     @classmethod
